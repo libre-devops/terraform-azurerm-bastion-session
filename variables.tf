@@ -17,22 +17,20 @@ variable "auth" {
 
 variable "bastion" {
   description = <<-EOT
-    The bastion the session creates when it opens and deletes when it closes. It is never in
-    Terraform state. subnet_id is the virtual network's AzureBastionSubnet, which the calling stack
-    keeps (a subnet costs nothing). The public IP is public_ip_name (default pip-<name>). sku is
-    Standard or Premium, the SKUs with native client tunnelling. ip_connect_enabled lets targets be
-    given by private IP address (peered or on-premises machines; SSH on port 22 only).
+    The bastion the session creates (in resource_group_id, at location) when it opens and deletes
+    when it closes. It is never in Terraform state. subnet_id is the virtual network's
+    AzureBastionSubnet (pass the network module's subnet_ids output), which the calling stack keeps:
+    a subnet costs nothing. The public IP is public_ip_name (default pip-<name>). sku is Standard or
+    Premium, the SKUs with native client tunnelling. ip_connect_enabled lets targets be given by
+    private IP address (peered or on-premises machines; SSH on port 22 only).
   EOT
   type = object({
-    name                = string
-    resource_group_name = string
-    location            = string
-    subnet_id           = string
-    public_ip_name      = optional(string)
-    sku                 = optional(string, "Standard")
-    scale_units         = optional(number, 2)
-    ip_connect_enabled  = optional(bool, false)
-    tags                = optional(map(string), {})
+    name               = string
+    subnet_id          = string
+    public_ip_name     = optional(string)
+    sku                = optional(string, "Standard")
+    scale_units        = optional(number, 2)
+    ip_connect_enabled = optional(bool, false)
   })
 
   validation {
@@ -74,6 +72,11 @@ variable "configure" {
   default     = false
 }
 
+variable "location" {
+  description = "Azure region for the bastion and its public IP: the region of the virtual network that holds bastion.subnet_id."
+  type        = string
+}
+
 variable "login_role" {
   description = <<-EOT
     Grant the identity running Terraform an Entra ID sign-in role on each target for the length of
@@ -108,6 +111,22 @@ variable "ready_timeout" {
   description = "Seconds to wait, once the bastion is up, for SSH to answer through it on every target (a new sign-in role takes a while to apply)."
   type        = number
   default     = 300
+}
+
+variable "resource_group_id" {
+  description = "Resource id of the resource group to create the bastion and its public IP in. The name and subscription are parsed from it (pass the rg module's ids output), and the scripts give az that subscription, so the Azure CLI's own selected subscription does not matter."
+  type        = string
+
+  validation {
+    condition     = can(regex("^/subscriptions/[^/]+/resourceGroups/[^/]+$", var.resource_group_id))
+    error_message = "resource_group_id must be a resource group id of the form /subscriptions/<sub>/resourceGroups/<name>."
+  }
+}
+
+variable "tags" {
+  description = "Tags applied to the bastion and its public IP, along with BastionSession = <name>, which marks them as this session's."
+  type        = map(string)
+  default     = {}
 }
 
 variable "targets" {

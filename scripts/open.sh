@@ -37,6 +37,7 @@ scale_units="$(session_get .bastion.scale_units)"
 ip_connect="$(session_get .bastion.ip_connect_enabled)"
 ready_timeout="$(session_get .ready_timeout)"
 mapfile -t targets < <(session_get '.targets | keys[]')
+mapfile -t sub < <(subscription_args)
 mapfile -t tags < <(jq -r --arg tag "$SESSION_TAG" --arg name "$name" \
   '(.bastion.tags // {}) + {($tag): $name} | to_entries[] | "\(.key)=\(.value)"' <<<"$BASTION_SESSION")
 
@@ -92,7 +93,7 @@ else
     if [[ -n "${fetched[$secret_id]:-}" ]]; then
       install -m 600 "${fetched[$secret_id]}" "$work_dir/keys/$target"
     else
-      fetch_key "$secret_id" "$work_dir/keys/$target"
+      fetch_key "$secret_id" "$work_dir/keys/$target" "${sub[@]}"
       fetched[$secret_id]="$work_dir/keys/$target"
     fi
     log "Fetched the SSH key for $target."
@@ -111,14 +112,14 @@ bastion_matches() {
 # Wait for a bastion that is being deleted to go.
 wait_bastion_gone() {
   local deadline=$((SECONDS + 1800))
-  while [[ -n "$(az_show network bastion show --name "$bastion" --resource-group "$rg")" ]]; do
+  while [[ -n "$(az_show network bastion show --name "$bastion" --resource-group "$rg" "${sub[@]}")" ]]; do
     ((SECONDS < deadline)) || die "$bastion was still being deleted after 30 minutes."
     sleep 15
   done
 }
 
 reuse=false
-bastion_json="$(az_show network bastion show --name "$bastion" --resource-group "$rg")"
+bastion_json="$(az_show network bastion show --name "$bastion" --resource-group "$rg" "${sub[@]}")"
 if [[ -n "$bastion_json" ]]; then
   [[ "$(session_owner "$bastion_json")" == "$name" ]] ||
     die "A bastion called $bastion already exists in $rg and is not this session's (no $SESSION_TAG=$name tag): give the session another bastion.name, or delete that bastion."
@@ -131,26 +132,26 @@ if [[ -n "$bastion_json" ]]; then
     wait_bastion_gone
   else
     log "Deleting $bastion, left by an earlier session ($state, or with other settings)."
-    az network bastion delete --name "$bastion" --resource-group "$rg" --yes --only-show-errors
+    az network bastion delete --name "$bastion" --resource-group "$rg" "${sub[@]}" --yes --only-show-errors
     wait_bastion_gone
   fi
 fi
 
 if [[ "$reuse" == "false" ]]; then
-  pip_json="$(az_show network public-ip show --name "$pip" --resource-group "$rg")"
+  pip_json="$(az_show network public-ip show --name "$pip" --resource-group "$rg" "${sub[@]}")"
   if [[ -n "$pip_json" ]]; then
     [[ "$(session_owner "$pip_json")" == "$name" ]] ||
       die "A public IP called $pip already exists in $rg and is not this session's (no $SESSION_TAG=$name tag): set bastion.public_ip_name to another name, or delete it."
     log "Reusing the public IP $pip, which an earlier session left."
   else
     log "Creating the public IP $pip."
-    az network public-ip create --name "$pip" --resource-group "$rg" --location "$location" \
+    az network public-ip create --name "$pip" --resource-group "$rg" "${sub[@]}" --location "$location" \
       --sku Standard --allocation-method Static --version IPv4 --tags "${tags[@]}" \
       --only-show-errors --output none
   fi
 
   log "Creating $sku bastion $bastion with $scale_units scale units (this usually takes 5 to 10 minutes)."
-  az network bastion create --name "$bastion" --resource-group "$rg" --location "$location" \
+  az network bastion create --name "$bastion" --resource-group "$rg" "${sub[@]}" --location "$location" \
     --vnet-name "${subnet_id%/subnets/*}" --public-ip-address "$pip" --sku "$sku" \
     --scale-units "$scale_units" --enable-tunneling true --enable-ip-connect "$ip_connect" \
     --tags "${tags[@]}" --only-show-errors --output none

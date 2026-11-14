@@ -27,24 +27,28 @@ through it to VMs nobody can reach from outside, and deletes it once the roles h
 
 ## Usage
 
-Open a session, chain any of the Libre DevOps roles on it, and close it, all in one apply:
+Open a session, chain any of the Libre DevOps roles on it, and close it, all in one apply. Like
+every Libre DevOps module it is a building block: the resource group goes in by id (the name and
+subscription are parsed from it), and everything else is a reference to the stack's other modules:
 
 ```hcl
 module "bastion_session" {
   source = "libre-devops/bastion-session/azurerm"
 
+  resource_group_id = module.rg.ids[local.rg_name]
+  location          = local.location
+  tags              = module.tags.tags
+
   name      = "base"
   configure = var.configure # false: an ordinary infrastructure apply, no bastion
 
   bastion = {
-    name                = "bas-ldo-uks-dev-001"
-    resource_group_name = "rg-ldo-uks-dev-001"
-    location            = "uksouth"
-    subnet_id           = module.network.subnet_ids["AzureBastionSubnet"]
+    name      = local.bas_name
+    subnet_id = module.network.subnet_ids["AzureBastionSubnet"]
   }
 
   targets = {
-    vm-ldo-uks-dev-001 = { id = module.linux_vm.ids["vm-ldo-uks-dev-001"], groups = ["mde_linux"] }
+    (local.vm_name) = { id = module.linux_vm.ids[local.vm_name], groups = ["mde_linux"] }
   }
 
   # Every call that runs through the session, so the bastion closes only after they finish.
@@ -146,6 +150,10 @@ ID certificate, 15 or more minutes into the apply. So when the CLI is a service 
 with a federated token and the job has `id-token: write`, the scripts sign it in again with a fresh
 GitHub ID token: when the session opens, before the certificate is issued, every 45 minutes while
 it is open (for the tunnels' access tokens), and when it closes. Any other sign-in is left alone.
+
+The scripts give `az` the subscription from `resource_group_id` for the bastion, its public IP and
+the tunnels, so the Azure CLI's own selected subscription does not matter (a vaulted key's vault is
+looked up in that subscription too).
 
 The identity needs to create and delete a bastion and a public IP in the bastion's resource group,
 join the `AzureBastionSubnet`, and read the target VMs. For `entra` it also needs to create and

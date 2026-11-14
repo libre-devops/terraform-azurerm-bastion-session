@@ -154,15 +154,16 @@ module "vm_entra_login" {
 module "bastion_session" {
   source = "../../"
 
+  resource_group_id = module.rg.ids[local.rg_name]
+  location          = local.location
+  tags              = module.tags.tags
+
   name      = "minimal"
   configure = var.configure
 
   bastion = {
-    name                = local.bas_name
-    resource_group_name = local.rg_name
-    location            = local.location
-    subnet_id           = module.network.subnet_ids["AzureBastionSubnet"]
-    tags                = module.tags.tags
+    name      = local.bas_name
+    subnet_id = module.network.subnet_ids["AzureBastionSubnet"]
   }
 
   targets = {

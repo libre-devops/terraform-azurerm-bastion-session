@@ -29,6 +29,7 @@ target="${2:?usage: proxy.sh <session working directory> <target name>}"
 BASTION_SESSION="$(cat "$work_dir/session.json")"
 
 [[ -n "$(session_opt ".targets[\"$target\"] | type")" ]] || die "$target is not a target of this session."
+mapfile -t sub < <(subscription_args)
 
 # One process at a time checks and (re)starts this target's tunnel. The kernel drops the lock when
 # the process exits, even if it is killed.
@@ -44,7 +45,7 @@ if ! tunnel_alive "$work_dir" "$target"; then
   port="$(free_port)"
   pid="$(start_tunnel "$(session_get .bastion.name)" "$(session_get .bastion.resource_group_name)" \
     "${target_args[@]}" "$(session_get ".targets[\"$target\"].port")" "$port" \
-    "$(session_get .tunnel_timeout)" "$work_dir/tunnels/$target.log")"
+    "$(session_get .tunnel_timeout)" "$work_dir/tunnels/$target.log" "${sub[@]}")"
   deadline=$((SECONDS + 90))
   until port_listening "$port"; do
     if ! kill -0 "$pid" 2>/dev/null || ((SECONDS >= deadline)); then

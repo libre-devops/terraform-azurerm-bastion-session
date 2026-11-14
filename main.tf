@@ -17,13 +17,23 @@
 locals {
   work_dir = abspath(coalesce(var.working_directory, "${path.root}/.terraform/bastion-session/${var.name}"))
 
+  # The resource group is passed by id and parsed (the pass-ids standard). The module has no
+  # providers, so a regex rather than provider::azurerm::parse_resource_id.
+  rg = regex("^/subscriptions/(?P<subscription_id>[^/]+)/resourceGroups/(?P<name>[^/]+)$", var.resource_group_id)
+
   # Everything the scripts need, handed over as JSON in BASTION_SESSION. Kept in the resources'
   # input as well, so the destroy-time provisioner can read it from self.
   session = {
-    name           = var.name
-    work_dir       = local.work_dir
-    auth           = var.auth
-    bastion        = merge(var.bastion, { public_ip_name = coalesce(var.bastion.public_ip_name, "pip-${var.bastion.name}") })
+    name     = var.name
+    work_dir = local.work_dir
+    auth     = var.auth
+    bastion = merge(var.bastion, {
+      public_ip_name      = coalesce(var.bastion.public_ip_name, "pip-${var.bastion.name}")
+      resource_group_name = local.rg.name
+      subscription_id     = local.rg.subscription_id
+      location            = var.location
+      tags                = var.tags
+    })
     login_role     = var.login_role
     ready_timeout  = var.ready_timeout
     tunnel_timeout = var.tunnel_timeout

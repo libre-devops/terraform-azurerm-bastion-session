@@ -27,24 +27,28 @@ through it to VMs nobody can reach from outside, and deletes it once the roles h
 
 ## Usage
 
-Open a session, chain any of the Libre DevOps roles on it, and close it, all in one apply:
+Open a session, chain any of the Libre DevOps roles on it, and close it, all in one apply. Like
+every Libre DevOps module it is a building block: the resource group goes in by id (the name and
+subscription are parsed from it), and everything else is a reference to the stack's other modules:
 
 ```hcl
 module "bastion_session" {
   source = "libre-devops/bastion-session/azurerm"
 
+  resource_group_id = module.rg.ids[local.rg_name]
+  location          = local.location
+  tags              = module.tags.tags
+
   name      = "base"
   configure = var.configure # false: an ordinary infrastructure apply, no bastion
 
   bastion = {
-    name                = "bas-ldo-uks-dev-001"
-    resource_group_name = "rg-ldo-uks-dev-001"
-    location            = "uksouth"
-    subnet_id           = module.network.subnet_ids["AzureBastionSubnet"]
+    name      = local.bas_name
+    subnet_id = module.network.subnet_ids["AzureBastionSubnet"]
   }
 
   targets = {
-    vm-ldo-uks-dev-001 = { id = module.linux_vm.ids["vm-ldo-uks-dev-001"], groups = ["mde_linux"] }
+    (local.vm_name) = { id = module.linux_vm.ids[local.vm_name], groups = ["mde_linux"] }
   }
 
   # Every call that runs through the session, so the bastion closes only after they finish.
@@ -147,6 +151,10 @@ with a federated token and the job has `id-token: write`, the scripts sign it in
 GitHub ID token: when the session opens, before the certificate is issued, every 45 minutes while
 it is open (for the tunnels' access tokens), and when it closes. Any other sign-in is left alone.
 
+The scripts give `az` the subscription from `resource_group_id` for the bastion, its public IP and
+the tunnels, so the Azure CLI's own selected subscription does not matter (a vaulted key's vault is
+looked up in that subscription too).
+
 The identity needs to create and delete a bastion and a public IP in the bastion's resource group,
 join the `AzureBastionSubnet`, and read the target VMs. For `entra` it also needs to create and
 delete role assignments on them (Role Based Access Control Administrator, User Access Administrator
@@ -216,12 +224,15 @@ No modules.
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_auth"></a> [auth](#input\_auth) | How Ansible signs in to the targets: entra (a short-lived Entra ID OpenSSH certificate for the<br/>identity running Terraform, issued with az ssh config) or key (each target's own private key,<br/>fetched from the Key Vault secret in its ssh\_key\_secret\_id and signed in as its user). For key,<br/>the vault's firewall is opened to this machine only for the fetch, with LibreDevOpsHelpers'<br/>Add-LdoKeyVaultCurrentIpRule and Remove-LdoKeyVaultCurrentIpRule (needs PowerShell 7). | `string` | `"entra"` | no |
-| <a name="input_bastion"></a> [bastion](#input\_bastion) | The bastion the session creates when it opens and deletes when it closes. It is never in<br/>Terraform state. subnet\_id is the virtual network's AzureBastionSubnet, which the calling stack<br/>keeps (a subnet costs nothing). The public IP is public\_ip\_name (default pip-<name>). sku is<br/>Standard or Premium, the SKUs with native client tunnelling. ip\_connect\_enabled lets targets be<br/>given by private IP address (peered or on-premises machines; SSH on port 22 only). | <pre>object({<br/>    name                = string<br/>    resource_group_name = string<br/>    location            = string<br/>    subnet_id           = string<br/>    public_ip_name      = optional(string)<br/>    sku                 = optional(string, "Standard")<br/>    scale_units         = optional(number, 2)<br/>    ip_connect_enabled  = optional(bool, false)<br/>    tags                = optional(map(string), {})<br/>  })</pre> | n/a | yes |
+| <a name="input_bastion"></a> [bastion](#input\_bastion) | The bastion the session creates (in resource\_group\_id, at location) when it opens and deletes<br/>when it closes. It is never in Terraform state. subnet\_id is the virtual network's<br/>AzureBastionSubnet (pass the network module's subnet\_ids output), which the calling stack keeps:<br/>a subnet costs nothing. The public IP is public\_ip\_name (default pip-<name>). sku is Standard or<br/>Premium, the SKUs with native client tunnelling. ip\_connect\_enabled lets targets be given by<br/>private IP address (peered or on-premises machines; SSH on port 22 only). | <pre>object({<br/>    name               = string<br/>    subnet_id          = string<br/>    public_ip_name     = optional(string)<br/>    sku                = optional(string, "Standard")<br/>    scale_units        = optional(number, 2)<br/>    ip_connect_enabled = optional(bool, false)<br/>  })</pre> | n/a | yes |
 | <a name="input_close_after"></a> [close\_after](#input\_close\_after) | Something from every module call that runs through the session, such as<br/>[module.python[*].run\_ids, module.mde\_linux[*].run\_ids]. The session closes (the bastion is<br/>deleted) only once all of it is known, which is after those runs have finished. Leave a call out<br/>and the bastion can close while that call is still running. | `any` | `null` | no |
 | <a name="input_configure"></a> [configure](#input\_configure) | Open a session in this apply. When true, the apply creates the bastion, the role runs that use<br/>ansible\_hosts go through it, and the bastion is deleted once they finish (see close\_after).<br/>When false (the default), nothing is created, ansible\_hosts is empty, and the apply is an<br/>ordinary infrastructure apply. terraform-ansible-role needs at least one host, so give each<br/>role call count = <the same value> rather than an empty hosts map. | `bool` | `false` | no |
+| <a name="input_location"></a> [location](#input\_location) | Azure region for the bastion and its public IP: the region of the virtual network that holds bastion.subnet\_id. | `string` | n/a | yes |
 | <a name="input_login_role"></a> [login\_role](#input\_login\_role) | Grant the identity running Terraform an Entra ID sign-in role on each target for the length of<br/>the session (entra sign-in only), and remove it when the session closes. Virtual Machine<br/>Administrator Login gives the passwordless sudo that become needs; Virtual Machine User Login<br/>does not. A new assignment can take a minute or two to apply, which ready\_timeout allows for.<br/>Set enabled = false when the identity already holds a standing role. | <pre>object({<br/>    enabled   = optional(bool, true)<br/>    role_name = optional(string, "Virtual Machine Administrator Login")<br/>  })</pre> | `{}` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name of the session, used for its working directory. Unique per module call in a root module. | `string` | n/a | yes |
 | <a name="input_ready_timeout"></a> [ready\_timeout](#input\_ready\_timeout) | Seconds to wait, once the bastion is up, for SSH to answer through it on every target (a new sign-in role takes a while to apply). | `number` | `300` | no |
+| <a name="input_resource_group_id"></a> [resource\_group\_id](#input\_resource\_group\_id) | Resource id of the resource group to create the bastion and its public IP in. The name and subscription are parsed from it (pass the rg module's ids output), and the scripts give az that subscription, so the Azure CLI's own selected subscription does not matter. | `string` | n/a | yes |
+| <a name="input_tags"></a> [tags](#input\_tags) | Tags applied to the bastion and its public IP, along with BastionSession = <name>, which marks them as this session's. | `map(string)` | `{}` | no |
 | <a name="input_targets"></a> [targets](#input\_targets) | The machines to reach, keyed by the inventory name they get in ansible\_hosts. Each entry: id<br/>(the VM's resource ID; the bastion reaches VMs in its own and peered virtual networks), or<br/>ip\_address instead when bastion.ip\_connect\_enabled is true; groups (inventory groups); port<br/>(default 22); for key sign-in, user and ssh\_key\_secret\_id (the Key Vault secret holding the<br/>private key, such as the ssh-key module's private\_key\_secret\_versionless\_ids); and triggers<br/>(values, such as the VM's ID, passed on to terraform-ansible-role so a replaced VM is<br/>configured again with a clean known\_hosts). | <pre>map(object({<br/>    id                = optional(string)<br/>    ip_address        = optional(string)<br/>    groups            = optional(list(string), [])<br/>    port              = optional(number, 22)<br/>    user              = optional(string)<br/>    ssh_key_secret_id = optional(string)<br/>    triggers          = optional(map(string), {})<br/>  }))</pre> | n/a | yes |
 | <a name="input_tunnel_timeout"></a> [tunnel\_timeout](#input\_tunnel\_timeout) | Most seconds a target's tunnel stays open (az network bastion tunnel --timeout). One tunnel carries every connection to its target for the whole session, so make this longer than the role runs take: a tunnel that reaches it drops its connections (the next connection starts a new one). It is the backstop that stops a tunnel outliving a session whose close step never ran. | `number` | `7200` | no |
 | <a name="input_working_directory"></a> [working\_directory](#input\_working\_directory) | Directory for the session's SSH config, certificate or keys and tunnel logs while it is open. Default: .terraform/bastion-session/<name> in the root module, which Git already ignores. Closing the session removes them. | `string` | `null` | no |

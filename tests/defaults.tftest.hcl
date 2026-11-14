@@ -5,11 +5,13 @@
 variables {
   name = "tst"
 
+  resource_group_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-ldo-uks-tst-001"
+  location          = "uksouth"
+  tags              = { Environment = "tst" }
+
   bastion = {
-    name                = "bas-ldo-uks-tst-001"
-    resource_group_name = "rg-ldo-uks-tst-001"
-    location            = "uksouth"
-    subnet_id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-ldo-uks-tst-001/providers/Microsoft.Network/virtualNetworks/vnet-ldo-uks-tst-001/subnets/AzureBastionSubnet"
+    name      = "bas-ldo-uks-tst-001"
+    subnet_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-ldo-uks-tst-001/providers/Microsoft.Network/virtualNetworks/vnet-ldo-uks-tst-001/subnets/AzureBastionSubnet"
   }
 
   targets = {
@@ -71,6 +73,26 @@ run "configure_opens_and_closes_one_session" {
     condition     = jsondecode(output.session_json).bastion.ip_connect_enabled == false && jsondecode(output.session_json).login_role.enabled
     error_message = "The scripts should get every bastion and login_role default explicitly, false included."
   }
+
+  assert {
+    condition = (
+      jsondecode(output.session_json).bastion.subscription_id == "00000000-0000-0000-0000-000000000000" &&
+      jsondecode(output.session_json).bastion.resource_group_name == "rg-ldo-uks-tst-001" &&
+      jsondecode(output.session_json).bastion.location == "uksouth" &&
+      jsondecode(output.session_json).bastion.tags.Environment == "tst"
+    )
+    error_message = "The scripts should get the subscription and resource group parsed from resource_group_id, with location and tags."
+  }
+}
+
+run "resource_group_id_must_be_a_resource_group" {
+  command = plan
+
+  variables {
+    resource_group_id = "rg-ldo-uks-tst-001"
+  }
+
+  expect_failures = [var.resource_group_id]
 }
 
 run "key_auth_needs_a_user_and_secret" {
@@ -88,10 +110,8 @@ run "bastion_needs_the_bastion_subnet" {
 
   variables {
     bastion = {
-      name                = "bas-ldo-uks-tst-001"
-      resource_group_name = "rg-ldo-uks-tst-001"
-      location            = "uksouth"
-      subnet_id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-ldo-uks-tst-001/providers/Microsoft.Network/virtualNetworks/vnet-ldo-uks-tst-001/subnets/snet-vm"
+      name      = "bas-ldo-uks-tst-001"
+      subnet_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-ldo-uks-tst-001/providers/Microsoft.Network/virtualNetworks/vnet-ldo-uks-tst-001/subnets/snet-vm"
     }
   }
 

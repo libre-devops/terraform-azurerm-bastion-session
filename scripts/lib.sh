@@ -27,6 +27,16 @@ session_opt() {
   jq -r "($1) | select(. != null) | tostring" <<<"${BASTION_SESSION:?BASTION_SESSION is not set}"
 }
 
+# The session's subscription (parsed from resource_group_id) as az arguments, one per line, so the
+# bastion, its public IP and the tunnels never depend on the subscription the Azure CLI happens to
+# have selected. Nothing for a session from before subscription_id was recorded.
+#   mapfile -t sub < <(subscription_args)
+subscription_args() {
+  local subscription
+  subscription="$(session_opt .bastion.subscription_id)"
+  [[ -z "$subscription" ]] || printf '%s\n' --subscription "$subscription"
+}
+
 need() {
   local cmd
   for cmd in "$@"; do
@@ -234,9 +244,9 @@ current_ip() {
 
 # Whether a vault's firewall already lets this machine in: no firewall, default Allow, or an IP rule
 # for it (the terraform-azure action's firewall dance, or the stack's own ip_rules).
-#   vault_admits <vault name> <ip address>
+#   vault_admits <vault name> <ip address> [az arguments, such as --subscription <id>]
 vault_admits() {
-  az keyvault show --name "$1" --query properties.networkAcls --output json --only-show-errors |
+  az keyvault show --name "$1" "${@:3}" --query properties.networkAcls --output json --only-show-errors |
     jq -e --arg ip "$2" \
       '. == null or .defaultAction == "Allow" or any(.ipRules[]?; .value == $ip or .value == ($ip + "/32"))' \
       >/dev/null
@@ -253,15 +263,16 @@ close_vault() {
 # Fetch one target's private key from a Key Vault secret ID into a 0600 file. When the vault's
 # firewall does not already let this machine in, it is opened to it for the fetch and closed straight
 # after, pass or fail; a rule someone else put there (the terraform-azure action's dance, or the
-# stack's ip_rules, in the middle of an apply) is left alone.
-#   fetch_key <secret id> <destination file>
+# stack's ip_rules, in the middle of an apply) is left alone. The vault is looked up in the
+# subscription the az arguments give (the session's), or the Azure CLI's selected one.
+#   fetch_key <secret id> <destination file> [az arguments, such as --subscription <id>]
 fetch_key() {
   local secret_id="$1" dest="$2" vault vault_rg attempt ip opened=false rc=1
   vault="${secret_id#https://}"
   vault="${vault%%.*}"
-  vault_rg="$(az keyvault show --name "$vault" --query resourceGroup --output tsv --only-show-errors)"
+  vault_rg="$(az keyvault show --name "$vault" "${@:3}" --query resourceGroup --output tsv --only-show-errors)"
   ip="$(current_ip)" || ip=""
-  if [[ -n "$ip" ]] && vault_admits "$vault" "$ip"; then
+  if [[ -n "$ip" ]] && vault_admits "$vault" "$ip" "${@:3}"; then
     log "The $vault firewall already admits $ip."
   else
     ldo "Add-LdoKeyVaultCurrentIpRule -ResourceGroup '$vault_rg' -KeyVaultName '$vault'"
@@ -289,11 +300,12 @@ fetch_key() {
 # standard streams are redirected, so the tunnel never holds Terraform's or SSH's pipes open, and
 # the lock descriptors proxy.sh uses are closed, so it never holds a lock either.
 #   start_tunnel <bastion> <resource group> <--target-resource-id|--target-ip-address> <target>
-#                <resource port> <local port> <timeout> <log file>
+#                <resource port> <local port> <timeout> <log file> [az arguments, such as
+#                --subscription <id>]
 # Prints the tunnel's PID.
 start_tunnel() {
   setsid az network bastion tunnel --name "$1" --resource-group "$2" \
-    "$3" "$4" --resource-port "$5" --port "$6" --timeout "$7" --only-show-errors \
+    "$3" "$4" --resource-port "$5" --port "$6" --timeout "$7" --only-show-errors "${@:9}" \
     </dev/null >"$8" 2>&1 8>&- 9>&- &
   echo "$!"
 }

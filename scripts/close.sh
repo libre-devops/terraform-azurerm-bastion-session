@@ -41,6 +41,7 @@ bastion="$(session_get .bastion.name)"
 rg="$(session_get .bastion.resource_group_name)"
 pip="$(session_opt .bastion.public_ip_name)"
 pip="${pip:-pip-$bastion}"
+mapfile -t sub < <(subscription_args)
 rc=0
 
 # A long apply can outlast the Azure CLI's GitHub OIDC sign-in (see lib.sh).
@@ -68,7 +69,7 @@ fi
 #   delete_owned <kind for messages> <az group> <name>
 delete_owned() {
   local kind="$1" group="$2" resource="$3" json
-  json="$(az_show network "$group" show --name "$resource" --resource-group "$rg")" || return 1
+  json="$(az_show network "$group" show --name "$resource" --resource-group "$rg" "${sub[@]}")" || return 1
   if [[ -z "$json" ]]; then
     return 0
   fi
@@ -78,14 +79,14 @@ delete_owned() {
   fi
   log "Deleting the $kind $resource${4:-}."
   if [[ "$group" == "bastion" ]]; then
-    az network bastion delete --name "$resource" --resource-group "$rg" --yes --only-show-errors --output none
+    az network bastion delete --name "$resource" --resource-group "$rg" "${sub[@]}" --yes --only-show-errors --output none
   else
-    az network public-ip delete --name "$resource" --resource-group "$rg" --only-show-errors --output none
+    az network public-ip delete --name "$resource" --resource-group "$rg" "${sub[@]}" --only-show-errors --output none
   fi
 }
 
 # No resource group means nothing was ever created (or the stack has gone).
-if [[ "$(az group exists --name "$rg" --only-show-errors)" == "true" ]]; then
+if [[ "$(az group exists --name "$rg" "${sub[@]}" --only-show-errors)" == "true" ]]; then
   delete_owned bastion bastion "$bastion" " (this usually takes a few minutes)" || {
     log "Could not delete the bastion $bastion: delete it by hand, it is billed by the hour."
     rc=1

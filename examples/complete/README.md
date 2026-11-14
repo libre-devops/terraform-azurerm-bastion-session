@@ -234,17 +234,18 @@ module "vm_entra_login" {
 module "bastion_session" {
   source = "../../"
 
+  resource_group_id = module.rg.ids[local.rg_name]
+  location          = local.location
+  tags              = module.tags.tags
+
   name      = "complete"
   configure = var.configure
   auth      = "key"
 
   bastion = {
-    name                = local.bas_name
-    resource_group_name = local.rg_name
-    location            = local.location
-    subnet_id           = module.network.subnet_ids["AzureBastionSubnet"]
-    scale_units         = 3
-    tags                = module.tags.tags
+    name        = local.bas_name
+    subnet_id   = module.network.subnet_ids["AzureBastionSubnet"]
+    scale_units = 3
   }
 
   login_role    = { enabled = false }
