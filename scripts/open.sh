@@ -12,9 +12,10 @@
 #   5. Wait up to ready_timeout for SSH to sign in on every target. That first connection starts the
 #      target's tunnel, which every later connection reuses.
 #
-# On failure the module's open step fails and the apply stops. Whatever was created stays until
-# close.sh runs: in the always() step after the apply, or when the next apply replaces or removes
-# the open step.
+# On failure it runs close.sh to delete whatever it created, then fails the module's open step and
+# the apply. It has to clean up itself: a failed open step is tainted, and Terraform does not run
+# the destroy-time close for a tainted resource. (If close.sh cannot finish, session.json stays, so
+# the always() step after the apply tries again.)
 set -euo pipefail
 
 SCRIPTS_DIR="$(cd "${SCRIPTS_DIR:-$(dirname "$0")}" && pwd)"
@@ -44,6 +45,18 @@ for path in "$work_dir" "$SCRIPTS_DIR"; do
   [[ "$path" != *[\'%\"]* ]] || die "Paths with quotes or % cannot go in a ProxyCommand: $path"
 done
 
+# From here on, a failure closes what was created before it is handed back.
+opened=false
+on_exit() {
+  local rc=$?
+  if ((rc != 0)) && [[ "$opened" == "false" ]]; then
+    log "Opening failed: closing what this session created."
+    "$SCRIPTS_DIR/close.sh" || log "Could not close everything: run $SCRIPTS_DIR/close.sh $work_dir"
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
+
 ensure_extensions bastion
 [[ "$auth" == "entra" ]] && ensure_extensions ssh
 
@@ -54,6 +67,7 @@ mkdir -p "$work_dir"
 chmod 700 "$work_dir"
 mkdir -m 700 "$work_dir/keys" "$work_dir/tunnels"
 (umask 077 && printf '%s\n' "$BASTION_SESSION" >"$work_dir/session.json")
+refresh_github_oidc_login "$work_dir" force
 
 # --- 1. Sign-in ------------------------------------------------------------------------------------
 
@@ -146,6 +160,9 @@ fi
 # --- 3. The Entra ID certificate -------------------------------------------------------------------
 
 if [[ "$auth" == "entra" ]]; then
+  # The bastion took minutes, so in GitHub Actions the sign-in needs a fresh GitHub ID token for the
+  # certificate's new access token.
+  refresh_github_oidc_login "$work_dir" force
   ssh-keygen -q -t rsa -b 4096 -N '' -C "bastion-session-$name" -f "$work_dir/keys/id_rsa"
   issue_certificate "$work_dir/keys/id_rsa"
   entra_user="$(certificate_user "$work_dir/keys/id_rsa-cert.pub")"
@@ -213,4 +230,5 @@ failed=0
 for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
 ((failed == 0)) || die "The session did not come up on every target."
 
+opened=true
 log "Session $name is open: ssh -F $work_dir/ssh_config <target>"

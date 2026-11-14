@@ -96,8 +96,11 @@ change: no bastion, nothing billed, and plans that can say "No changes".
 The first `configure = false` apply after a configure run shows those runs being removed; that
 changes nothing on the VMs.
 
-**When a run fails.** Terraform has no "finally": a failed run skips the close step and leaves the
-bastion up. Three things close it:
+**When a run fails.** If the open step itself fails, `open.sh` runs `close.sh` before it exits,
+so nothing it created is left. (It has to: Terraform marks a failed open step tainted, and does not
+run a tainted resource's destroy-time provisioner.) A role run that fails is different. Terraform
+has no "finally", so the apply stops before the close step and the bastion stays up. Three things
+close it:
 
 - **The next apply.** Destroying the open step runs `close.sh` first, and every later apply destroys
   it: one with `configure = true` replaces it, and one with `configure = false` (or a
@@ -134,6 +137,15 @@ Linux (or WSL): the scripts use `setsid` and `flock`, which macOS does not have.
   only for the key fetch.
 
 GitHub's `ubuntu-latest` image has everything but Ansible.
+
+**GitHub Actions with OIDC.** `azure/login` (and the terraform-azure action) signs the Azure CLI in
+with a GitHub ID token that Entra ID accepts for five minutes. Terraform's own provider fetches a
+new one whenever it needs to, but the CLI cannot: it keeps working on the access tokens it already
+holds, and the first new one it needs fails with `AADSTS700024`. For the session that is the Entra
+ID certificate, 15 or more minutes into the apply. So when the CLI is a service principal signed in
+with a federated token and the job has `id-token: write`, the scripts sign it in again with a fresh
+GitHub ID token: when the session opens, before the certificate is issued, every 45 minutes while
+it is open (for the tunnels' access tokens), and when it closes. Any other sign-in is left alone.
 
 The identity needs to create and delete a bastion and a public IP in the bastion's resource group,
 join the `AzureBastionSubnet`, and read the target VMs. For `entra` it also needs to create and

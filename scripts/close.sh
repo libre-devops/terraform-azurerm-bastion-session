@@ -43,6 +43,9 @@ pip="$(session_opt .bastion.public_ip_name)"
 pip="${pip:-pip-$bastion}"
 rc=0
 
+# A long apply can outlast the Azure CLI's GitHub OIDC sign-in (see lib.sh).
+refresh_github_oidc_login "$work_dir" force || log "Could not sign the Azure CLI in again; carrying on with its current sign-in."
+
 # --- 1. Tunnels ------------------------------------------------------------------------------------
 
 stop_tunnels "${work_dir:-/nonexistent}" "$bastion" "$rg"

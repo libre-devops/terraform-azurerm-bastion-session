@@ -55,8 +55,10 @@ locals {
 #
 # Destroying it (the next apply with configure = true replaces it; one with configure = false, or a
 # terraform destroy, removes it) runs close.sh first. After a clean run that finds nothing to do in
-# a few seconds; after a run that failed before the close step, it deletes what that run left, so
-# no later apply leaves a bastion running, and a destroy never trips over one in the subnet.
+# a few seconds; after a role run that failed before the close step, it deletes what that run left,
+# so no later apply leaves a bastion running, and a destroy never trips over one in the subnet.
+# Terraform skips this for a tainted instance (one whose open.sh failed), which is why open.sh
+# closes what it created itself when it fails.
 resource "terraform_data" "open" {
   for_each = local.sessions
 

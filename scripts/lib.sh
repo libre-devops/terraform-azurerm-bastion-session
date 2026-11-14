@@ -78,6 +78,50 @@ port_listening() {
   fi
 }
 
+# In GitHub Actions with OIDC (azure/login, or the terraform-azure action), the Azure CLI signed in
+# with a GitHub ID token, which Entra ID accepts for five minutes only. The CLI keeps using the
+# access tokens it already holds, but every new one fails after that: the Entra ID SSH certificate's
+# (AADSTS700024, found on the first pipeline run, 20 minutes in) and Azure Resource Manager's once
+# the first expires, after an hour or so. So this signs the CLI in again with a fresh GitHub ID
+# token. A tunnel that is already running picks up the new access tokens from the CLI's shared
+# token cache. It only acts for a service principal signed in with a federated token while GitHub's
+# ID token endpoint is there (a job with id-token: write); any other sign-in is left alone.
+#
+# Given a working directory, it runs at most once every 45 minutes (less than an access token
+# lasts) unless "force" is passed, and only one process at a time does it.
+#   refresh_github_oidc_login [working directory] [force]
+refresh_github_oidc_login() {
+  [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" && -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]] || return 0
+  local dir="${1:-}" force="${2:-}"
+  if [[ -z "$dir" || ! -d "$dir" ]]; then
+    github_oidc_login
+    return
+  fi
+  [[ "$force" != "force" && -n "$(find "$dir/.login-refreshed" -mmin -45 2>/dev/null)" ]] && return 0
+  (
+    flock -w 120 7 || exit 1
+    [[ "$force" != "force" && -n "$(find "$dir/.login-refreshed" -mmin -45 2>/dev/null)" ]] && exit 0
+    github_oidc_login && touch "$dir/.login-refreshed"
+  ) 7>"$dir/.login.lock"
+}
+
+github_oidc_login() {
+  local account client entries id_token
+  account="$(az account show --output json --only-show-errors)" || return 1
+  client="$(jq -r 'select(.user.type == "servicePrincipal" and .user.assignedIdentityInfo == null) | .user.name' <<<"$account")"
+  entries="${AZURE_CONFIG_DIR:-$HOME/.azure}/service_principal_entries.json"
+  if [[ -z "$client" || ! -f "$entries" ]] ||
+    ! jq -e --arg client "$client" 'any(.[]; .client_id == $client and has("client_assertion"))' "$entries" >/dev/null; then
+    return 0
+  fi
+  id_token="$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+    "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api%3A%2F%2FAzureADTokenExchange" | jq -er .value)" || return 1
+  az login --service-principal --username "$client" --tenant "$(jq -r .tenantId <<<"$account")" \
+    --federated-token "$id_token" --allow-no-subscriptions --only-show-errors --output none || return 1
+  az account set --subscription "$(jq -r .id <<<"$account")" --only-show-errors || return 1
+  log "Signed the Azure CLI in again with a fresh GitHub OIDC token."
+}
+
 # A local port nothing is listening on.
 free_port() {
   python3 -I -c 'import socket
@@ -284,7 +328,8 @@ stop_tunnels() {
 remove_session_files() {
   [[ -d "$1" ]] || return 0
   rm -rf "$1/keys" "$1/tunnels"
-  rm -f "$1/ssh_config" "$1/known_hosts" "$1/known_hosts.old" "$1/.certificate.lock"
+  rm -f "$1/ssh_config" "$1/known_hosts" "$1/known_hosts.old" "$1/.certificate.lock" \
+    "$1/.login-refreshed" "$1/.login.lock" "$1/background.log"
   [[ "${2:-}" == "keep" ]] || rm -f "$1/session.json"
   rmdir "$1" 2>/dev/null || true
 }

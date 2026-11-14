@@ -9,8 +9,12 @@
 # The first connection starts the tunnel (open.sh's ready check, normally) and the rest find it
 # running; a tunnel that died or timed out is started again. close.sh stops them all.
 #
-# With entra sign-in it also renews the certificate when less than 10 minutes are left, so long runs
-# keep signing in (the connection being made still uses the old one, which is valid for long enough).
+# Two jobs for the connections after this one, in the background, so this connection is not held up
+# against Ansible's ConnectTimeout (log: <working directory>/background.log):
+#   - in GitHub Actions with OIDC, sign the Azure CLI in again every 45 minutes or so, so the tunnels
+#     keep getting access tokens (see refresh_github_oidc_login in lib.sh)
+#   - with entra sign-in, renew the certificate when less than 10 minutes are left (this connection
+#     still uses the current one, which is valid for long enough)
 #
 # stdout is the SSH connection, so everything else goes to stderr (which SSH shows) or log files.
 set -euo pipefail
@@ -57,17 +61,22 @@ fi
 port="$(cat "$work_dir/tunnels/$target.port")"
 exec 9>&-
 
-# Renew the Entra ID certificate for the connections after this one. Best effort: a failure here
-# leaves the current certificate, which still has a few minutes.
+# The background jobs, with every descriptor but the log closed, so they hold neither SSH's pipes
+# nor a lock.
 cert="$work_dir/keys/id_rsa-cert.pub"
-if [[ -f "$cert" ]] && (($(certificate_seconds_left "$cert") < 600)); then
-  (
+(
+  refresh_github_oidc_login "$work_dir" || log "Could not sign the Azure CLI in again."
+  if [[ -f "$cert" ]] && (($(certificate_seconds_left "$cert") < 600)); then
     exec 8>"$work_dir/.certificate.lock"
     if flock -n 8 && (($(certificate_seconds_left "$cert") < 600)); then
-      issue_certificate "$work_dir/keys/id_rsa" && log "Renewed the Entra ID SSH certificate." ||
+      refresh_github_oidc_login "$work_dir" force || log "Could not sign the Azure CLI in again."
+      if issue_certificate "$work_dir/keys/id_rsa"; then
+        log "Renewed the Entra ID SSH certificate."
+      else
         log "Could not renew the Entra ID SSH certificate."
+      fi
     fi
-  ) || true
-fi
+  fi
+) </dev/null >>"$work_dir/background.log" 2>&1 &
 
 exec python3 -I "$SCRIPTS_DIR/relay.py" "$port"
