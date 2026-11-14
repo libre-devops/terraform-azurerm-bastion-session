@@ -1,3 +1,9 @@
+variable "configure" {
+  description = "Open a bastion session in this apply and run the roles through it. Leave false for an ordinary infrastructure apply."
+  type        = bool
+  default     = false
+}
+
 # Forwarded into the tags module for the DeployedBranch / DeployedRepo tags. The terraform-azure
 # action fills these in CI via TF_VAR_deployed_branch / TF_VAR_deployed_repo; empty when run locally.
 variable "deployed_branch" {
@@ -10,6 +16,12 @@ variable "deployed_repo" {
   description = "Repository URL the deployment came from. Auto-filled in CI from TF_VAR_deployed_repo."
   type        = string
   default     = ""
+}
+
+variable "key_vault_ip_rules" {
+  description = "IPs or CIDRs kept open on the key vault's firewall for the length of the run. Pass the runner's egress IP on every Terraform step, as azure-orchestration's pipelines do: it lets the vault and the key be created in one apply and stops an apply revoking its own access. Empty for anything else."
+  type        = list(string)
+  default     = []
 }
 
 variable "loc" {
@@ -35,20 +47,8 @@ variable "short" {
   default     = "ldo"
 }
 
-variable "configure" {
-  description = "Open a bastion session in this apply and run the roles through it. Leave false for an ordinary infrastructure apply."
-  type        = bool
-  default     = false
-}
-
 variable "vm_size" {
   description = "Size of the VM."
   type        = string
   default     = "Standard_D2lds_v6"
-}
-
-variable "key_vault_ip_rules" {
-  description = "IPs or CIDRs kept open on the key vault's firewall for the length of the run. Pass the runner's egress IP on every Terraform step, as azure-orchestration's pipelines do: it lets the vault and the key be created in one apply and stops an apply revoking its own access. Empty for anything else."
-  type        = list(string)
-  default     = []
 }

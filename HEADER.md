@@ -25,11 +25,6 @@ through it to VMs nobody can reach from outside, and deletes it once the roles h
 
 ---
 
-> **Status: skeleton.** The interface (inputs, outputs, the open and close steps) is in place and
-> tested at plan time, but the scripts that create the bastion, carry the SSH connections and
-> delete it again are not written yet: they exit "not implemented". Leave `configure = false`
-> until the first release.
-
 ## Usage
 
 Open a session, chain any of the Libre DevOps roles on it, and close it, all in one apply:
@@ -73,7 +68,7 @@ module "mde_linux" {
   count  = var.configure ? 1 : 0
 
   name               = "mde-linux"
-  roles              = [{ name = "libre_devops.mde_linux", version = "1.0.0" }]
+  roles              = [{ name = "libre_devops.mde_linux", version = "1.1.0" }]
   hosts              = module.bastion_session.ansible_hosts
   wait_for_ssh       = false
   run_on_every_apply = true
@@ -86,9 +81,9 @@ module "mde_linux" {
 
 | Step | What happens |
 |---|---|
-| Open | `terraform_data.open` runs [`scripts/open.sh`](./scripts/open.sh): it creates the public IP and a Standard (or Premium) bastion with native client tunnelling in the stack's `AzureBastionSubnet` with `az`, grants the identity running Terraform the Entra ID sign-in role (`auth = "entra"`) or fetches each target's vaulted key (`auth = "key"`), writes the session's `ssh_config`, and waits until SSH answers through the bastion. |
-| Run | Every `terraform-ansible-role` call given `ansible_hosts` runs through the session, in parallel or chained with `depends_on`. Each SSH connection goes through [`scripts/proxy.sh`](./scripts/proxy.sh), the `ProxyCommand` in `ssh_config`, which opens its own `az network bastion tunnel` and kills it when the connection ends, so no tunnel outlives its connection. |
-| Close | `terraform_data.close` runs [`scripts/close.sh`](./scripts/close.sh) once everything in `close_after` is known, which is after the runs finish: it deletes the bastion, its public IP and the role assignment, and removes the `ssh_config`, certificate and keys. |
+| Open | `terraform_data.open` runs [`scripts/open.sh`](./scripts/open.sh). It grants the identity running Terraform the Entra ID sign-in role on each target (`auth = "entra"`; first, so the grant has the bastion's creation time to apply) or fetches each target's vaulted key (`auth = "key"`). It creates the public IP and a Standard (or Premium) bastion with native client tunnelling in the stack's `AzureBastionSubnet` with `az`, issues a short-lived Entra ID certificate, writes the session's `ssh_config`, and waits until SSH signs in through the bastion on every target. |
+| Run | Every `terraform-ansible-role` call given `ansible_hosts` runs through the session, in parallel or chained with `depends_on`. Each SSH connection goes through [`scripts/proxy.sh`](./scripts/proxy.sh), the `ProxyCommand` in `ssh_config`, which relays it to the target's tunnel: one `az network bastion tunnel` per target, started by the first connection and shared by the rest. (Starting a tunnel takes several seconds, longer than the 10 seconds Ansible gives SSH to connect, so a tunnel per connection would time out.) A tunnel that dies is started again, and the Entra ID certificate is renewed before it expires, so long runs keep working. |
+| Close | `terraform_data.close` runs [`scripts/close.sh`](./scripts/close.sh) once everything in `close_after` is known, which is after the runs finish. It stops the tunnels, removes the role assignments, deletes the bastion and its public IP, and removes the `ssh_config`, certificate and keys. |
 
 **Why the bastion is not a Terraform resource.** Terraform cannot create and delete the same
 resource in one apply, which is what forced the old pattern of two applies (open the window, run
@@ -102,20 +97,49 @@ The first `configure = false` apply after a configure run shows those runs being
 changes nothing on the VMs.
 
 **When a run fails.** Terraform has no "finally": a failed run skips the close step and leaves the
-bastion up. Run the close script in an `always()` step after the apply (the `close_script` and
-`session_json` outputs say how), and keep a scheduled sweeper as a backstop.
+bastion up. Three things close it:
+
+- **The next apply.** Destroying the open step runs `close.sh` first, and every later apply destroys
+  it: one with `configure = true` replaces it, and one with `configure = false` (or a
+  `terraform destroy`) removes it. After a clean run that finds nothing to do in a few seconds.
+- **An `always()` step in CI**, straight after the apply, so the bastion does not wait for the next
+  apply:
+
+  ```yaml
+  - name: Close the bastion session
+    if: always()
+    working-directory: stacks/my-stack
+    run: .terraform/modules/bastion_session/scripts/close.sh .terraform/bastion-session/base
+  ```
+
+  `close.sh <working directory>` reads the `session.json` the open step left there, so it needs no
+  Terraform state (or state storage firewall), and it does nothing when no session is open. The
+  `close_script` and `working_directory` outputs give both paths.
+- **A scheduled sweeper**, for a run cancelled so hard that Terraform never recorded the open step.
+
+`close.sh` only deletes a bastion and public IP tagged `BastionSession = <name>` and role
+assignments whose description is `BastionSession=<name>`, so it never touches anything the session
+did not create. For the same reason `open.sh` refuses to start if a bastion with the session's name
+exists without that tag.
 
 ## Requirements on the machine running Terraform
 
-The Azure CLI, signed in (`az login`, or `azure/login` in CI) with the `bastion` and `ssh`
-extensions, bash, `jq` and `setsid`; `ansible-core` for terraform-ansible-role; and for
-`auth = "key"` PowerShell 7 with [LibreDevOpsHelpers](https://www.powershellgallery.com/packages/LibreDevOpsHelpers),
-which opens each key vault's firewall to the machine only for the key fetch. GitHub's
-`ubuntu-latest` image has everything but Ansible.
+Linux (or WSL): the scripts use `setsid` and `flock`, which macOS does not have. On it:
+
+- the Azure CLI, signed in (`az login`, or `azure/login` in CI). `open.sh` adds the `bastion` and
+  `ssh` extensions if they are missing.
+- bash, `jq`, `python3`, `ssh` and `ssh-keygen`, and `ansible-core` for terraform-ansible-role.
+- for `auth = "key"`, PowerShell 7 with [LibreDevOpsHelpers](https://www.powershellgallery.com/packages/LibreDevOpsHelpers)
+  (installed from PSGallery if it is missing), which opens each key vault's firewall to the machine
+  only for the key fetch.
+
+GitHub's `ubuntu-latest` image has everything but Ansible.
 
 The identity needs to create and delete a bastion and a public IP in the bastion's resource group,
-join the `AzureBastionSubnet`, read the target VMs, and, for `entra`, create and delete role
-assignments on them (or hold the sign-in role already, with `login_role.enabled = false`).
+join the `AzureBastionSubnet`, and read the target VMs. For `entra` it also needs to create and
+delete role assignments on them (Role Based Access Control Administrator, User Access Administrator
+or Owner), or to hold the sign-in role already, with `login_role.enabled = false`. For `key` it
+needs Get on the vaults' secrets and the right to change their network rules.
 
 ## Examples
 

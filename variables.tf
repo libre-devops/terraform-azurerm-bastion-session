@@ -157,7 +157,7 @@ variable "targets" {
 }
 
 variable "tunnel_timeout" {
-  description = "Most seconds any one tunnel stays open (az network bastion tunnel --timeout): a backstop so no tunnel outlives a run that went wrong."
+  description = "Most seconds a target's tunnel stays open (az network bastion tunnel --timeout). One tunnel carries every connection to its target for the whole session, so make this longer than the role runs take: a tunnel that reaches it drops its connections (the next connection starts a new one). It is the backstop that stops a tunnel outliving a session whose close step never ran."
   type        = number
   default     = 7200
 }

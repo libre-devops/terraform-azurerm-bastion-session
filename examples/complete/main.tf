@@ -249,13 +249,13 @@ module "python" {
 }
 
 # Then, on the same session, Defender for Endpoint on the mde_linux hosts only. depends_on chains it
-# after python; without it the two calls run in parallel, each with its own tunnels.
+# after python; without it the two calls run in parallel, sharing the session's tunnels.
 module "mde_linux" {
   source = "git::https://github.com/libre-devops/terraform-ansible-role.git?ref=4.0.0"
   count  = var.configure ? 1 : 0
 
   name  = "mde-linux"
-  roles = [{ name = "libre_devops.mde_linux", version = "1.0.0" }]
+  roles = [{ name = "libre_devops.mde_linux", version = "1.1.0" }]
   hosts = {
     for name, host in module.bastion_session.ansible_hosts : name => host if contains(host.groups, "mde_linux")
   }

@@ -1,27 +1,24 @@
 # Just-in-time Azure Bastion sessions for Terraform. With configure = true, one apply runs:
 #
-#   1. open   scripts/open.sh creates the public IP and a tunnelling bastion in the stack's
-#             AzureBastionSubnet with az, grants the sign-in role, issues the Entra ID certificate
-#             or fetches the vaulted keys, writes the session's ssh_config and waits until SSH
-#             answers through the bastion on every target
+#   1. open   scripts/open.sh grants the sign-in role (or fetches the vaulted keys), creates the
+#             public IP and a tunnelling bastion in the stack's AzureBastionSubnet with az, issues
+#             the Entra ID certificate, writes the session's ssh_config and waits until SSH signs in
+#             through the bastion on every target
 #   2. runs   any number of terraform-ansible-role calls given ansible_hosts, in parallel or chained
 #             with depends_on. Every SSH connection goes through scripts/proxy.sh (the ProxyCommand
-#             in ssh_config), which opens its own tunnel and closes it when the connection ends
+#             in ssh_config), which relays it to the target's tunnel, starting it if need be
 #   3. close  scripts/close.sh, once everything in close_after is known (the runs have finished):
-#             deletes the bastion, its public IP and the role assignment, and removes the
-#             ssh_config, certificate and keys
+#             stops the tunnels, removes the role assignments, deletes the bastion and its public
+#             IP, and removes the ssh_config, certificate and keys
 #
 # The bastion is created with az rather than as a resource, because Terraform cannot create and
 # delete the same resource in one apply. So it is never in state, and an apply with
 # configure = false has nothing to change.
-#
-# STATUS: skeleton. The interface is in place; the scripts exit "not implemented" until the work is
-# done, so leave configure = false for now.
 locals {
   work_dir = abspath(coalesce(var.working_directory, "${path.root}/.terraform/bastion-session/${var.name}"))
 
   # Everything the scripts need, handed over as JSON in BASTION_SESSION. Kept in the resources'
-  # input as well, so a destroy-time provisioner can read it from self if one is added.
+  # input as well, so the destroy-time provisioner can read it from self.
   session = {
     name           = var.name
     work_dir       = local.work_dir
@@ -55,6 +52,11 @@ locals {
 
 # Opens the session. Replaced on every apply with configure = true (plantimestamp changes each
 # plan), so every such apply opens a fresh bastion.
+#
+# Destroying it (the next apply with configure = true replaces it; one with configure = false, or a
+# terraform destroy, removes it) runs close.sh first. After a clean run that finds nothing to do in
+# a few seconds; after a run that failed before the close step, it deletes what that run left, so
+# no later apply leaves a bastion running, and a destroy never trips over one in the subnet.
 resource "terraform_data" "open" {
   for_each = local.sessions
 
@@ -66,6 +68,16 @@ resource "terraform_data" "open" {
     interpreter = ["bash", "-c"]
     environment = {
       BASTION_SESSION = jsonencode(each.value)
+      SCRIPTS_DIR     = "${path.module}/scripts"
+    }
+  }
+
+  provisioner "local-exec" {
+    when        = destroy
+    command     = "${path.module}/scripts/close.sh"
+    interpreter = ["bash", "-c"]
+    environment = {
+      BASTION_SESSION = jsonencode(self.input)
       SCRIPTS_DIR     = "${path.module}/scripts"
     }
   }

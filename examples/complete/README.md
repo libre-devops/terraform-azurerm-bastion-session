@@ -281,13 +281,13 @@ module "python" {
 }
 
 # Then, on the same session, Defender for Endpoint on the mde_linux hosts only. depends_on chains it
-# after python; without it the two calls run in parallel, each with its own tunnels.
+# after python; without it the two calls run in parallel, sharing the session's tunnels.
 module "mde_linux" {
   source = "git::https://github.com/libre-devops/terraform-ansible-role.git?ref=4.0.0"
   count  = var.configure ? 1 : 0
 
   name  = "mde-linux"
-  roles = [{ name = "libre_devops.mde_linux", version = "1.0.0" }]
+  roles = [{ name = "libre_devops.mde_linux", version = "1.1.0" }]
   hosts = {
     for name, host in module.bastion_session.ansible_hosts : name => host if contains(host.groups, "mde_linux")
   }
@@ -306,7 +306,7 @@ module "mde_linux" {
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.0, < 2.0.0 |
 | <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | >= 4.23.0, < 5.0.0 |
 | <a name="requirement_tls"></a> [tls](#requirement\_tls) | >= 4.1.0, < 5.0.0 |
@@ -314,13 +314,13 @@ module "mde_linux" {
 ## Providers
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | >= 4.23.0, < 5.0.0 |
 
 ## Modules
 
 | Name | Source | Version |
-|------|--------|---------|
+| ---- | ------ | ------- |
 | <a name="module_bastion_session"></a> [bastion\_session](#module\_bastion\_session) | ../../ | n/a |
 | <a name="module_keyvault"></a> [keyvault](#module\_keyvault) | libre-devops/keyvault/azurerm | ~> 4.0 |
 | <a name="module_linux_vm"></a> [linux\_vm](#module\_linux\_vm) | libre-devops/linux-vm/azurerm | ~> 4.1 |
@@ -338,7 +338,7 @@ module "mde_linux" {
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [azurerm_client_config.current](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/client_config) | data source |
 
 ## Inputs
@@ -357,7 +357,7 @@ module "mde_linux" {
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_bastion_name"></a> [bastion\_name](#output\_bastion\_name) | Name of the bastion the session creates while it is open. |
 | <a name="output_configured"></a> [configured](#output\_configured) | Whether this apply opened a session and ran the roles. |
 | <a name="output_key_vault_ids"></a> [key\_vault\_ids](#output\_key\_vault\_ids) | Map of key vault name to id. |

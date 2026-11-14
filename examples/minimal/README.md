@@ -228,7 +228,7 @@ module "python" {
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.0, < 2.0.0 |
 | <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | >= 4.23.0, < 5.0.0 |
 | <a name="requirement_tls"></a> [tls](#requirement\_tls) | >= 4.1.0, < 5.0.0 |
@@ -236,13 +236,13 @@ module "python" {
 ## Providers
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="provider_tls"></a> [tls](#provider\_tls) | >= 4.1.0, < 5.0.0 |
 
 ## Modules
 
 | Name | Source | Version |
-|------|--------|---------|
+| ---- | ------ | ------- |
 | <a name="module_bastion_session"></a> [bastion\_session](#module\_bastion\_session) | ../../ | n/a |
 | <a name="module_linux_vm"></a> [linux\_vm](#module\_linux\_vm) | libre-devops/linux-vm/azurerm | ~> 4.1 |
 | <a name="module_nat_gateway"></a> [nat\_gateway](#module\_nat\_gateway) | libre-devops/nat-gateway/azurerm | ~> 4.0 |
@@ -257,7 +257,7 @@ module "python" {
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [tls_private_key.admin](https://registry.terraform.io/providers/hashicorp/tls/latest/docs/resources/private_key) | resource |
 
 ## Inputs
@@ -275,7 +275,7 @@ module "python" {
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_bastion_name"></a> [bastion\_name](#output\_bastion\_name) | Name of the bastion the session creates while it is open. |
 | <a name="output_configured"></a> [configured](#output\_configured) | Whether this apply opened a session and ran the roles. |
 | <a name="output_vm_ids"></a> [vm\_ids](#output\_vm\_ids) | Map of VM name to VM id. |

@@ -1,3 +1,9 @@
+variable "configure" {
+  description = "Open a bastion session in this apply and run the roles through it. Leave false for an ordinary infrastructure apply."
+  type        = bool
+  default     = false
+}
+
 # Forwarded into the tags module for the DeployedBranch / DeployedRepo tags. The terraform-azure
 # action fills these in CI via TF_VAR_deployed_branch / TF_VAR_deployed_repo; empty when run locally.
 variable "deployed_branch" {
@@ -33,12 +39,6 @@ variable "short" {
   description = "Infix: short product code used in resource names."
   type        = string
   default     = "ldo"
-}
-
-variable "configure" {
-  description = "Open a bastion session in this apply and run the roles through it. Leave false for an ordinary infrastructure apply."
-  type        = bool
-  default     = false
 }
 
 variable "vm_size" {

@@ -61,6 +61,16 @@ run "configure_opens_and_closes_one_session" {
     condition     = output.ansible_hosts["vm-ldo-uks-tst-001"].user == null
     error_message = "entra sign-in should leave the user to the session's ssh_config."
   }
+
+  assert {
+    condition     = jsondecode(output.session_json).bastion.public_ip_name == "pip-bas-ldo-uks-tst-001"
+    error_message = "The public IP should default to pip-<bastion name> in the settings the scripts read."
+  }
+
+  assert {
+    condition     = jsondecode(output.session_json).bastion.ip_connect_enabled == false && jsondecode(output.session_json).login_role.enabled
+    error_message = "The scripts should get every bastion and login_role default explicitly, false included."
+  }
 }
 
 run "key_auth_needs_a_user_and_secret" {
